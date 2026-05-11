@@ -50,7 +50,7 @@ Run the preflight check and block if errors exist:
 
 ```bash
 SKILL_DIR=$(find "$HOME" -maxdepth 4 -path "*/screenshot-iterate/scripts/preflight.sh" | head -1)
-"$SKILL_DIR/../preflight.sh" || { echo "Preflight failed — fix dependencies first"; exit; }
+"$SKILL_DIR/../preflight.sh" || { echo "Preflight failed. Fix dependencies first."; exit; }
 ```
 
 If preflight fails, stop and report which dependencies are missing. Do not proceed.
