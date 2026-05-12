@@ -69,8 +69,15 @@ fi
 
 # -- Build JSON --
 errors_json="[]"
-if [ ${#errors[@]} -gt 0 ]; then
+error_count=${#errors[@]}
+if [ "$error_count" -gt 0 ]; then
   errors_json=$(printf ',%s' "${errors[@]}" | sed 's/^,//')
+fi
+
+# -- Build JSON --
+error_items=""
+if [ ${#errors[@]} -gt 0 ]; then
+  error_items=$(printf ',%s' "${errors[@]}" | sed 's/^,//')
 fi
 
 cat <<EOF
@@ -82,7 +89,7 @@ cat <<EOF
   "dev_server_url": "$dev_server_url",
   "impeccable": $impeccable_ok,
   "max_iterations": $max_iter,
-  "errors": [$errors_json]
+  "errors": [$error_items]
 }
 EOF
 
