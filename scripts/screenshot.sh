@@ -2,14 +2,16 @@
 # screenshot.sh — Screenshot capture + GPT Image 2 generation helper
 # Usage:
 #   screenshot.sh capture <url> <output_path> [playwright|pinchtab]
-#   screenshot.sh generate <image_path> --prompt "<text>" [--size WxH] [--model gpt-image-2]
+#   screenshot.sh generate <image_path> --prompt "<text>" [--size WxH] [--method codex|api_key]
 
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
   echo "Usage:"
   echo "  $0 capture <url> <output_path> [playwright|pinchtab]"
-  echo "  $0 generate <image_path> --prompt \"<text>\" [--size 1536x1024] [--model gpt-image-2]"
+  echo "  $0 generate <image_path> --prompt \"<text>\" [--size 1536x1024] [--method codex|api_key]"
   exit 1
 }
 
@@ -23,8 +25,112 @@ detect_tool() {
   fi
 }
 
-[ $# -lt 1 ] && usage
+detect_img_method() {
+  openai_ok=false
+  codex_ok=false
 
+  [ -n "${OPENAI_API_KEY:-}" ] && openai_ok=true
+  command -v codex >/dev/null 2>&1 && [ -d ~/.codex ] && codex_ok=true
+
+  if [ "$openai_ok" = true ] && [ "$codex_ok" = true ]; then
+    echo "both"
+  elif [ "$codex_ok" = true ]; then
+    echo "codex"
+  elif [ "$openai_ok" = true ]; then
+    echo "api_key"
+  else
+    echo "none"
+  fi
+}
+
+gen_with_api_key() {
+  local image="$1" prompt="$2" size="$3" out="$4" model="${5:-gpt-image-2}"
+
+  curl -s https://api.openai.com/v1/images/edits \
+    -H "Authorization: Bearer $OPENAI_API_KEY" \
+    -F "image=@$image" \
+    -F "prompt=$prompt" \
+    -F "model=$model" \
+    -F "size=$size" \
+    -o "$out" 2>/dev/null
+
+  if [ -s "$out" ]; then
+    echo "$out"
+    return 0
+  else
+    rm -f "$out"
+    return 1
+  fi
+}
+
+gen_with_codex() {
+  local image="$1" prompt="$2" out="$3" timeout_sec="${4:-300}"
+
+  SESSIONS_ROOT="$HOME/.codex/sessions"
+  mkdir -p "$SESSIONS_ROOT"
+
+  before="$(mktemp)"; after="$(mktemp)"
+  stdout_log="$(mktemp)"; stderr_log="$(mktemp)"
+  trap 'rm -f "$before" "$after" "$stdout_log" "$stderr_log"' EXIT
+
+  find "$SESSIONS_ROOT" -type f -name 'rollout-*.jsonl' -print 2>/dev/null | sort > "$before" || true
+
+  instruction="Use the imagegen tool to generate the image for the following request. Use the attached image as visual reference / input for image-to-image.
+Requirements: generate the image directly, return only the image, no explanation.
+
+Request:
+$prompt"
+
+  # Timeout command detection
+  TO=""
+  if   command -v timeout  >/dev/null 2>&1; then TO="timeout"
+  elif command -v gtimeout >/dev/null 2>&1; then TO="gtimeout"
+  fi
+
+  args=(exec --skip-git-repo-check --sandbox read-only --color never --enable image_generation -i "$image")
+
+  set +e
+  if [[ -n "$TO" ]]; then
+    printf '%s' "$instruction" | "$TO" "$timeout_sec" codex "${args[@]}" >"$stdout_log" 2>"$stderr_log"
+  else
+    printf '%s' "$instruction" | codex "${args[@]}" >"$stdout_log" 2>"$stderr_log"
+  fi
+  rc=$?
+  set -e
+
+  if [[ $rc -ne 0 ]]; then
+    echo "codex exec failed (exit=$rc)" >&2
+    return 5
+  fi
+
+  find "$SESSIONS_ROOT" -type f -name 'rollout-*.jsonl' -print 2>/dev/null | sort > "$after" || true
+
+  new_sessions_file="$(mktemp)"
+  comm -13 "$before" "$after" > "$new_sessions_file" || true
+
+  if [[ ! -s "$new_sessions_file" ]]; then
+    echo "No new session file detected" >&2
+    return 6
+  fi
+
+  set +e
+  python3 "$SCRIPT_DIR/extract_image.py" "$out" "$new_sessions_file"
+  py_rc=$?
+  set -e
+
+  rm -f "$new_sessions_file"
+
+  if [[ $py_rc -ne 0 ]]; then
+    echo "Image payload not found in session file" >&2
+    return 7
+  fi
+
+  echo "$out"
+  return 0
+}
+
+# -- Main --
+[ $# -lt 1 ] && usage
 mode="$1"
 
 case "$mode" in
@@ -66,15 +172,15 @@ case "$mode" in
 
     prompt=""
     size="${SCREENSHOT_GENERATE_SIZE:-1536x1024}"
-    model="gpt-image-2"
+    method="${IMAGE_GEN_METHOD:-auto}"
     output_path="${image%.png}-redesign.png"
 
     while [ $# -gt 0 ]; do
       case "$1" in
-        --prompt) prompt="$2"; shift 2 ;;
-        --size)   size="$2"; shift 2 ;;
-        --model)  model="$2"; shift 2 ;;
-        *)        shift ;;
+        --prompt)  prompt="$2"; shift 2 ;;
+        --size)    size="$2"; shift 2 ;;
+        --method)  method="$2"; shift 2 ;;
+        *)         shift ;;
       esac
     done
 
@@ -83,21 +189,68 @@ case "$mode" in
       exit 1
     fi
 
-    curl -s https://api.openai.com/v1/images/edits \
-      -H "Authorization: Bearer $OPENAI_API_KEY" \
-      -F "image=@$image" \
-      -F "prompt=$prompt" \
-      -F "model=$model" \
-      -F "size=$size" \
-      -o "$output_path" 2>/dev/null
+    # Resolve method
+    available=$(detect_img_method)
 
-    if [ -s "$output_path" ]; then
-      echo "$output_path"
-    else
-      echo "ERROR: GPT Image 2 generation failed or returned empty file" >&2
-      rm -f "$output_path"
-      exit 1
-    fi
+    case "$method" in
+      codex|api_key)
+        chosen="$method"
+        ;;
+      auto|both)
+        if [ "$available" = "both" ]; then
+          echo "Both methods available: Codex CLI (free via ChatGPT subscription)"
+          echo "  or OpenAI API key (per-call billing)."
+          echo "Which would you like to use?"
+          echo ""
+          read -r choice || true
+          case "${choice,,}" in
+            codex*) chosen="codex" ;;
+            api*)   chosen="api_key" ;;
+            1)      chosen="codex" ;;
+            2)      chosen="api_key" ;;
+            *)      echo "Defaulting to codex (no extra cost)" && chosen="codex" ;;
+          esac
+        elif [ "$available" = "codex" ]; then
+          chosen="codex"
+        elif [ "$available" = "api_key" ]; then
+          chosen="api_key"
+        else
+          echo "ERROR: No image generation method available (need OPENAI_API_KEY or codex CLI)" >&2
+          exit 1
+        fi
+        ;;
+      *)
+        echo "ERROR: Unknown method '$method'. Use 'codex', 'api_key', or 'auto'." >&2
+        exit 1
+        ;;
+    esac
+
+    # Execute chosen method
+    case "$chosen" in
+      codex)
+        set +e
+        result=$(gen_with_codex "$image" "$prompt" "$output_path")
+        rc=$?
+        set -e
+        if [ $rc -eq 0 ]; then
+          echo "$result"
+        else
+          rm -f "$output_path"
+          exit $rc
+        fi
+        ;;
+      api_key)
+        set +e
+        result=$(gen_with_api_key "$image" "$prompt" "$size" "$output_path")
+        rc=$?
+        set -e
+        if [ $rc -eq 0 ]; then
+          echo "$result"
+        else
+          exit 1
+        fi
+        ;;
+    esac
     ;;
 
   *)
