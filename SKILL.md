@@ -15,12 +15,17 @@ Distributable skill that adapts to any project via auto-detection. No presets ne
 
 | Dependency | What it provides | How the agent checks |
 |---|---|---|
-| `OPENAI_API_KEY` env var | GPT Image 2 API access | `preflight.sh` |
+| Image generation method* | GPT Image 2 API access | `preflight.sh` |
 | Screenshot tool | Capture live UI | Auto-detected: Playwright > pinchtab |
 | Dev server running | Target screen to capture | Auto-detected from running processes or env |
 | impeccable skill | Critique engine | Checked in preflight |
 
-If any hard dependency is missing, the skill stops with a clear error. No fallback.
+\* **Image generation** — need one of:
+- **Codex CLI** (`codex`) + ChatGPT Plus/Pro subscription → zero extra cost, reuses your plan
+- **OpenAI API key** (`OPENAI_API_KEY` env var) → per-call billing on your API account
+
+If both are available, the agent asks which to use. If only one, it auto-selects.
+Set `IMAGE_GEN_METHOD=codex|api_key` to skip the prompt and force a method.
 
 ## Auto-Detection (3 axes)
 
@@ -182,6 +187,9 @@ Two modes:
 | Mode | Command | Output |
 |---|---|---|
 | `capture` | `screenshot.sh capture <url> <output.png> [tool]` | Screenshot file |
-| `generate` | `screenshot.sh generate <image.png> --prompt "..."` | Path to redesign.png (stdout) |
+| `generate` | `screenshot.sh generate <image.png> --prompt "..." [--method codex\|api_key]` | Path to redesign.png (stdout) |
 
-Both detect tools automatically if not specified. Use env vars `SCREENSHOT_ITERATE_URL` and `SCREENSHOT_GENERATE_SIZE` for overrides.
+Both detect tools automatically if not specified. Use env vars:
+- `IMAGE_GEN_METHOD=codex|api_key` — force method (default: auto-detect)
+- `SCREENSHOT_ITERATE_URL` — dev server URL override
+- `SCREENSHOT_GENERATE_SIZE` — image size for API key method (ignored by codex)
