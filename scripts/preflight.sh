@@ -43,6 +43,14 @@ fi
 # -- Max iterations (env override or default) --
 max_iter="${MAX_ITERATIONS:-5}"
 
+# -- Concepts mode (env override or default) --
+concepts_mode="${CONCEPTS_MODE:-first}"
+concepts_mode_valid=true
+case "$concepts_mode" in
+  first|always|never) ;;
+  *) concepts_mode_valid=false ;;
+esac
+
 # -- Image generation method selection --
 img_method="auto"
 if [ "$openai_api_ok" = true ] && [ "$codex_ok" = true ]; then
@@ -65,6 +73,9 @@ if [ "$screenshot_tool" = "none" ]; then
 fi
 if [ "$impeccable_ok" = false ]; then
   errors+=("\"impeccable skill not found (check ~/.pi/agent/skills/impeccable/ and ~/.agents/skills/impeccable/)\"")
+fi
+if [ "$concepts_mode_valid" = false ]; then
+  errors+=("\"Invalid CONCEPTS_MODE: '$concepts_mode' (must be first|always|never)\"")
 fi
 
 # -- Build JSON --
@@ -89,6 +100,7 @@ cat <<EOF
   "dev_server_url": "$dev_server_url",
   "impeccable": $impeccable_ok,
   "max_iterations": $max_iter,
+  "concepts_mode": "$concepts_mode",
   "errors": [$error_items]
 }
 EOF
