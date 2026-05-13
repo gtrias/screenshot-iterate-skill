@@ -45,6 +45,62 @@ Specify a target screen to improve. The agent will run the iteration loop automa
 /screenshot-iterate "the pricing page"
 ```
 
+## Concepts Mode (3-option pick)
+
+On the first iteration the skill generates 3 radically different design directions in parallel and lets you pick one (or refine, or regenerate) before any code changes happen. Subsequent iterations use single-shot generation within the chosen direction.
+
+### Example interaction
+
+```
+Option 1 — Bold & expressive
+  Strong type, accent colors, dense hierarchy.
+
+Option 2 — Minimal & restrained
+  Generous whitespace, neutral palette, quiet typography.
+
+Option 3 — Structured & editorial
+  Grid-driven sections, content-first, clear visual rhythm.
+
+Reply: 1 | 2 | 3 | refine N: <tweak> | regenerate
+```
+
+### `CONCEPTS_MODE`
+
+| Value | Behavior |
+|---|---|
+| `first` (default) | 3 options on iteration 1, single-shot after |
+| `always` | 3 options every iteration (higher cost) |
+| `never` | Disable; reproduces pre-concepts single-shot behavior end-to-end |
+
+### Session layout
+
+```
+.screenshot-iterate/
+├── INDEX.md                                  # session log
+└── sessions/
+    └── 2026-05-13_14-30-22-pricing-page/
+        ├── meta.json                         # target, chosen, scores
+        ├── baseline.png
+        ├── concepts/
+        │   ├── round-1/
+        │   │   ├── option-1.png
+        │   │   ├── option-2.png
+        │   │   ├── option-3.png
+        │   │   └── options.json
+        │   ├── round-2/                      # if regenerated
+        │   └── chosen.png
+        └── iterations/
+            └── iter-N-<category>.png
+```
+
+### Storybook
+
+If a Storybook setup is detected (`.storybook/` dir or `storybook` in package.json), the 3 current concepts are also written as a story at `src/stories/ScreenshotIterateConcepts.stories.tsx` so you can browse them in Storybook UI.
+
+### Backwards compatibility
+
+Setting `CONCEPTS_MODE=never` reproduces the pre-concepts single-shot behavior end-to-end.
+
 ## Scripts
 
 | Script | Description |
