@@ -47,6 +47,14 @@ Set `IMAGE_GEN_METHOD=codex|api_key` to skip the prompt and force a method.
 - **Max iterations:** env `MAX_ITERATIONS` (default: 5)
 - **Stall detection:** 2 consecutive iterations without score improvement → warn + ask user
 
+### Concepts mode
+
+- `CONCEPTS_MODE=first` (default) — 3-options pick on iteration 1, single-shot after
+- `CONCEPTS_MODE=always` — 3-options every iteration (higher cost; warns after 3 regen rounds in a session)
+- `CONCEPTS_MODE=never` — disable concept selection; reproduces pre-concepts behavior
+
+Setting `CONCEPTS_MODE=never` reproduces the pre-concepts single-shot behavior end-to-end — no session dir, no concept rounds, identical to versions before this feature.
+
 ## Workflow
 
 ### Step 1: Preflight
@@ -78,6 +86,57 @@ screenshot.sh capture "$TARGET_URL" "$BASELINE" "$TOOL"
 
 Read the screenshot file to understand the current state of the UI.
 
+### Step 3b: Initialize session
+
+```bash
+SESSION_DIR=$(screenshot.sh session-init "<target-slug>")
+cp "$BASELINE" "$SESSION_DIR/baseline.png"
+```
+
+The session dir persists under `.screenshot-iterate/sessions/<timestamp>-<target-slug>/` and is auto-added to `.gitignore`. All concept rounds, the chosen option, and iteration screenshots live under this dir for the rest of the loop.
+
+### Step 4a: Concept selection (3 options)
+
+Triggered on iteration 1 only by default (`CONCEPTS_MODE=first`). Skipped entirely when `CONCEPTS_MODE=never`. Run every iteration when `CONCEPTS_MODE=always`.
+
+**1. Choose 3 radically different style directions.** Adaptive to baseline weaknesses. Defaults:
+
+- **Bold & expressive** — strong color, large type, generous contrast
+- **Minimal & restrained** — neutral palette, tight type scale, lots of negative space
+- **Structured & editorial** — grid-forward, magazine-style hierarchy, intentional rules and dividers
+
+Swap any default if the baseline already embodies that direction (e.g., baseline is already minimal → replace "Minimal" with another contrasting direction).
+
+**2. Generate all 3 options in one call:**
+
+```bash
+screenshot.sh concepts-generate \
+  --session "$SESSION_DIR" --round 1 \
+  --prompt-1 "<bold & expressive prompt>" --label-1 "Bold & expressive" \
+  --prompt-2 "<minimal & restrained prompt>" --label-2 "Minimal & restrained" \
+  --prompt-3 "<structured & editorial prompt>" --label-3 "Structured & editorial"
+```
+
+**3. Read all 3 option PNGs inline** using the Read tool on each `$SESSION_DIR/concepts/round-<R>/option-1.png`, `option-2.png`, `option-3.png`.
+
+**4. Present to the user:**
+
+```
+Option 1 — Bold & expressive: <1-sentence description>
+Option 2 — Minimal & restrained: <1-sentence description>
+Option 3 — Structured & editorial: <1-sentence description>
+
+Reply: 1 | 2 | 3 | refine N: <tweak> | regenerate
+```
+
+**5. Handle the response:**
+
+- `N` → `screenshot.sh concepts-choose --session "$SESSION_DIR" --round <R> --option N`; proceed to Step 5.
+- `refine N: <tweak>` → craft a regen prompt referencing all 3 PNGs (e.g., "option 2 but with option 1's palette"); replace just option N in the current round, then re-present.
+- `regenerate` → increment round, generate a fresh 3 options. After 3 rounds (~12 images), warn the user about cost.
+
+Note: subsequent iterations (2+) use single-shot generation prefixed with the chosen direction for continuity, not the 3-options flow (unless `CONCEPTS_MODE=always`).
+
 ### Step 4: Generate improved design via GPT Image 2
 
 Craft a specific prompt based on what needs improvement. Run:
@@ -108,6 +167,8 @@ Invoke `$impeccable critique` on the current implementation, passing both screen
 
 - Current screenshot = baseline
 - GPT Image 2 output = redesign direction
+
+When concepts mode is active, the redesign image is `$SESSION_DIR/concepts/chosen.png` (written by `concepts-choose`). Pass baseline + `chosen.png` only — do **NOT** pass the rejected options to impeccable critique.
 
 Ask critique to focus on the **delta** — what specific CSS/Tailwind/code changes would move the current UI toward the improved design. Extract actionable items:
 
@@ -182,12 +243,15 @@ Exit 0 = all clear. Exit 1 = blocking errors in `errors` array.
 
 ### `screenshot.sh`
 
-Two modes:
+Modes:
 
 | Mode | Command | Output |
 |---|---|---|
 | `capture` | `screenshot.sh capture <url> <output.png> [tool]` | Screenshot file |
 | `generate` | `screenshot.sh generate <image.png> --prompt "..." [--method codex\|api_key]` | Path to redesign.png (stdout) |
+| `session-init` | `screenshot.sh session-init <target-slug>` | Session dir path on stdout |
+| `concepts-generate` | `screenshot.sh concepts-generate --session <dir> --round <N> --prompt-1 ... --label-1 ... --prompt-2 ... --label-2 ... --prompt-3 ... --label-3 ...` | Writes 3 PNGs + options.json under `<session>/concepts/round-<N>/`; emits Storybook story if SB detected |
+| `concepts-choose` | `screenshot.sh concepts-choose --session <dir> --round <N> --option <1\|2\|3>` | Writes `chosen.png`, updates `meta.json` |
 
 Both detect tools automatically if not specified. Use env vars:
 - `IMAGE_GEN_METHOD=codex|api_key` — force method (default: auto-detect)
