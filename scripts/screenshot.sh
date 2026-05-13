@@ -15,7 +15,45 @@ usage() {
   echo "  $0 session-init <target_slug>"
   echo "  $0 concepts-generate --session <dir> --round <N> \\"
   echo "      --prompt-1 <p> --label-1 <l> --prompt-2 <p> --label-2 <l> --prompt-3 <p> --label-3 <l>"
+  echo "  $0 concepts-choose --session <dir> --round <N> --option <1|2|3>"
   exit 1
+}
+
+concepts_choose() {
+  local session="" round="" option=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --session) session="$2"; shift 2 ;;
+      --round)   round="$2"; shift 2 ;;
+      --option)  option="$2"; shift 2 ;;
+      *) echo "concepts-choose: unknown arg '$1'" >&2; exit 1 ;;
+    esac
+  done
+  if [ -z "$session" ] || [ -z "$round" ] || [ -z "$option" ]; then
+    echo "concepts-choose: --session, --round, --option required" >&2
+    exit 1
+  fi
+  case "$option" in
+    1|2|3) ;;
+    *) echo "concepts-choose: --option must be 1, 2, or 3" >&2; exit 1 ;;
+  esac
+
+  local src="$session/concepts/round-$round/option-$option.png"
+  local options_json="$session/concepts/round-$round/options.json"
+  [ -f "$src" ] || { echo "concepts-choose: option file not found: $src" >&2; exit 1; }
+  [ -f "$options_json" ] || { echo "concepts-choose: options.json not found: $options_json" >&2; exit 1; }
+  [ -f "$session/meta.json" ] || { echo "concepts-choose: meta.json not found: $session/meta.json" >&2; exit 1; }
+
+  cp "$src" "$session/concepts/chosen.png"
+
+  local label
+  label=$(jq -r --argjson n "$option" '.[] | select(.n == $n) | .label' "$options_json")
+  [ -n "$label" ] || { echo "concepts-choose: no label for option $option in $options_json" >&2; exit 1; }
+
+  local tmp; tmp=$(mktemp)
+  jq --argjson r "$round" --argjson o "$option" --arg l "$label" \
+    '.chosen = {round: $r, option: $o, label: $l}' "$session/meta.json" > "$tmp"
+  mv "$tmp" "$session/meta.json"
 }
 
 concepts_generate() {
@@ -359,6 +397,11 @@ case "$mode" in
   concepts-generate)
     shift
     concepts_generate "$@"
+    ;;
+
+  concepts-choose)
+    shift
+    concepts_choose "$@"
     ;;
 
   *)
