@@ -13,7 +13,85 @@ usage() {
   echo "  $0 capture <url> <output_path> [playwright|pinchtab]"
   echo "  $0 generate <image_path> --prompt \"<text>\" [--size 1536x1024] [--method codex|api_key]"
   echo "  $0 session-init <target_slug>"
+  echo "  $0 concepts-generate --session <dir> --round <N> \\"
+  echo "      --prompt-1 <p> --label-1 <l> --prompt-2 <p> --label-2 <l> --prompt-3 <p> --label-3 <l>"
   exit 1
+}
+
+concepts_generate() {
+  local session="" round=""
+  local prompts=("" "" "")
+  local labels=("" "" "")
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --session)  session="$2"; shift 2 ;;
+      --round)    round="$2"; shift 2 ;;
+      --prompt-1) prompts[0]="$2"; shift 2 ;;
+      --prompt-2) prompts[1]="$2"; shift 2 ;;
+      --prompt-3) prompts[2]="$2"; shift 2 ;;
+      --label-1)  labels[0]="$2"; shift 2 ;;
+      --label-2)  labels[1]="$2"; shift 2 ;;
+      --label-3)  labels[2]="$2"; shift 2 ;;
+      *) echo "concepts-generate: unknown arg '$1'" >&2; exit 1 ;;
+    esac
+  done
+
+  if [ -z "$session" ] || [ -z "$round" ]; then
+    echo "concepts-generate: --session and --round are required" >&2
+    exit 1
+  fi
+  for i in 0 1 2; do
+    if [ -z "${prompts[$i]}" ] || [ -z "${labels[$i]}" ]; then
+      echo "concepts-generate: --prompt-$((i+1)) and --label-$((i+1)) are required" >&2
+      exit 1
+    fi
+  done
+
+  local baseline="$session/baseline.png"
+  if [ ! -f "$baseline" ]; then
+    echo "concepts-generate: baseline not found at $baseline" >&2
+    exit 1
+  fi
+
+  local round_dir="$session/concepts/round-$round"
+  mkdir -p "$round_dir"
+
+  _gen_one() {
+    local idx="$1" prompt="$2" out="$3"
+    if [ "${MOCK_GEN:-0}" = "1" ]; then
+      cp "$baseline" "$out"
+    else
+      bash "$0" generate "$baseline" --prompt "$prompt" >/dev/null
+      # generate writes to <image>-redesign.png
+      local generated="${baseline%.png}-redesign.png"
+      mv "$generated" "$out"
+    fi
+  }
+
+  local pids=()
+  for i in 0 1 2; do
+    ( _gen_one "$i" "${prompts[$i]}" "$round_dir/option-$((i+1)).png" ) &
+    pids+=($!)
+  done
+  local fail=0
+  for pid in "${pids[@]}"; do
+    wait "$pid" || fail=1
+  done
+  if [ "$fail" != "0" ]; then
+    echo "concepts-generate: one or more generations failed" >&2
+    exit 1
+  fi
+
+  jq -n \
+    --arg l1 "${labels[0]}" --arg p1 "${prompts[0]}" \
+    --arg l2 "${labels[1]}" --arg p2 "${prompts[1]}" \
+    --arg l3 "${labels[2]}" --arg p3 "${prompts[2]}" \
+    '[
+      {n: 1, label: $l1, prompt: $p1, path: "option-1.png"},
+      {n: 2, label: $l2, prompt: $p2, path: "option-2.png"},
+      {n: 3, label: $l3, prompt: $p3, path: "option-3.png"}
+    ]' > "$round_dir/options.json"
 }
 
 session_init() {
@@ -276,6 +354,11 @@ case "$mode" in
     shift
     [ $# -lt 1 ] && usage
     session_init "$@"
+    ;;
+
+  concepts-generate)
+    shift
+    concepts_generate "$@"
     ;;
 
   *)
