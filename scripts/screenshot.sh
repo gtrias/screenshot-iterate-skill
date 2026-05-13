@@ -12,7 +12,25 @@ usage() {
   echo "Usage:"
   echo "  $0 capture <url> <output_path> [playwright|pinchtab]"
   echo "  $0 generate <image_path> --prompt \"<text>\" [--size 1536x1024] [--method codex|api_key]"
+  echo "  $0 session-init <target_slug>"
   exit 1
+}
+
+session_init() {
+  local target_slug="$1"
+  local stamp; stamp=$(date +%Y-%m-%d_%H-%M-%S)
+  local root=".screenshot-iterate/sessions/${stamp}-${target_slug}"
+  mkdir -p "$root/concepts" "$root/iterations"
+  cat > "$root/meta.json" <<JSON
+{
+  "target": "$target_slug",
+  "created_at": "$stamp",
+  "rounds": [],
+  "chosen": null,
+  "scores": {}
+}
+JSON
+  echo "$root"
 }
 
 detect_tool() {
@@ -251,6 +269,12 @@ case "$mode" in
         fi
         ;;
     esac
+    ;;
+
+  session-init)
+    shift
+    [ $# -lt 1 ] && usage
+    session_init "$@"
     ;;
 
   *)
