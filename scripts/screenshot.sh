@@ -16,7 +16,42 @@ usage() {
   echo "  $0 concepts-generate --session <dir> --round <N> \\"
   echo "      --prompt-1 <p> --label-1 <l> --prompt-2 <p> --label-2 <l> --prompt-3 <p> --label-3 <l>"
   echo "  $0 concepts-choose --session <dir> --round <N> --option <1|2|3>"
+  echo "  $0 session-finalize --session <dir> --score-initial <N> --score-final <N>"
   exit 1
+}
+
+session_finalize() {
+  local session="" score_initial="" score_final=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --session)       session="$2"; shift 2 ;;
+      --score-initial) score_initial="$2"; shift 2 ;;
+      --score-final)   score_final="$2"; shift 2 ;;
+      *) echo "session-finalize: unknown arg '$1'" >&2; exit 1 ;;
+    esac
+  done
+  if [ -z "$session" ] || [ -z "$score_initial" ] || [ -z "$score_final" ]; then
+    echo "session-finalize: --session, --score-initial, --score-final required" >&2
+    exit 1
+  fi
+  [ -f "$session/meta.json" ] || { echo "session-finalize: meta.json not found: $session/meta.json" >&2; exit 1; }
+
+  local target stamp
+  target=$(jq -r '.target' "$session/meta.json")
+  stamp=$(jq -r '.created_at' "$session/meta.json")
+
+  local idx=".screenshot-iterate/INDEX.md"
+  mkdir -p .screenshot-iterate
+  if [ ! -f "$idx" ]; then
+    echo "# Screenshot-Iterate Session Log" > "$idx"
+    echo "" >> "$idx"
+  fi
+  printf -- "- %s — **%s** — %s → %s — \`%s\`\n" "$stamp" "$target" "$score_initial" "$score_final" "$session" >> "$idx"
+
+  local tmp; tmp=$(mktemp)
+  jq --argjson si "$score_initial" --argjson sf "$score_final" \
+    '.scores = {initial: $si, final: $sf}' "$session/meta.json" > "$tmp"
+  mv "$tmp" "$session/meta.json"
 }
 
 concepts_choose() {
@@ -455,6 +490,11 @@ case "$mode" in
   concepts-choose)
     shift
     concepts_choose "$@"
+    ;;
+
+  session-finalize)
+    shift
+    session_finalize "$@"
     ;;
 
   *)
