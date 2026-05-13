@@ -21,6 +21,13 @@ session_init() {
   local stamp; stamp=$(date +%Y-%m-%d_%H-%M-%S)
   local root=".screenshot-iterate/sessions/${stamp}-${target_slug}"
   mkdir -p "$root/concepts" "$root/iterations"
+  if [ -d .git ] && ! grep -qxF ".screenshot-iterate/" .gitignore 2>/dev/null; then
+    # Ensure the file ends with a newline before appending
+    if [ -s .gitignore ] && [ "$(tail -c1 .gitignore)" != "" ]; then
+      echo "" >> .gitignore
+    fi
+    echo ".screenshot-iterate/" >> .gitignore
+  fi
   jq -n --arg target "$target_slug" --arg created_at "$stamp" \
     '{target: $target, created_at: $created_at, chosen: null, scores: {}}' \
     > "$root/meta.json"
