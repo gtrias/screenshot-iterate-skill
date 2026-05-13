@@ -269,14 +269,33 @@ detect_img_method() {
 gen_with_api_key() {
   local image="$1" prompt="$2" size="$3" out="$4" model="${5:-gpt-image-2}"
 
+  local response
+  response="$(mktemp)"
+  trap 'rm -f "$response"' RETURN
+
   curl -s https://api.openai.com/v1/images/edits \
     -H "Authorization: Bearer $OPENAI_API_KEY" \
     -F "image=@$image" \
     -F "prompt=$prompt" \
     -F "model=$model" \
     -F "size=$size" \
-    -o "$out" 2>/dev/null
+    -o "$response" 2>/dev/null
 
+  if [ ! -s "$response" ]; then
+    rm -f "$out"
+    return 1
+  fi
+
+  # OpenAI images API returns JSON with data[0].b64_json — decode to bytes.
+  local b64
+  b64="$(jq -r '.data[0].b64_json // empty' "$response" 2>/dev/null)"
+  if [ -z "$b64" ]; then
+    echo "gen_with_api_key: no b64_json in response: $(head -c 500 "$response")" >&2
+    rm -f "$out"
+    return 1
+  fi
+
+  printf '%s' "$b64" | base64 -d > "$out" 2>/dev/null
   if [ -s "$out" ]; then
     echo "$out"
     return 0
