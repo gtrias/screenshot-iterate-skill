@@ -21,15 +21,9 @@ session_init() {
   local stamp; stamp=$(date +%Y-%m-%d_%H-%M-%S)
   local root=".screenshot-iterate/sessions/${stamp}-${target_slug}"
   mkdir -p "$root/concepts" "$root/iterations"
-  cat > "$root/meta.json" <<JSON
-{
-  "target": "$target_slug",
-  "created_at": "$stamp",
-  "rounds": [],
-  "chosen": null,
-  "scores": {}
-}
-JSON
+  jq -n --arg target "$target_slug" --arg created_at "$stamp" \
+    '{target: $target, created_at: $created_at, chosen: null, scores: {}}' \
+    > "$root/meta.json"
   echo "$root"
 }
 
